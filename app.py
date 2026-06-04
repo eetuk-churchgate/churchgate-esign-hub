@@ -7,16 +7,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 import hashlib
+import time
 
 sys.path.append(str(Path(__file__).parent))
 from database_setup import init_database
 from database_helper import Database
 
-# Auto-create database if it doesn't exist
 if not os.path.exists('esign_hub.db'):
     init_database()
 
-# Page config
 st.set_page_config(
     page_title="eSign Hub - Digital Approvals",
     page_icon="✍️",
@@ -24,21 +23,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize database
 if 'db' not in st.session_state:
     st.session_state.db = Database()
 
 db = st.session_state.db
 
-# Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'user' not in st.session_state:
     st.session_state.user = None
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 'Dashboard'
+if 'workflow_created' not in st.session_state:
+    st.session_state.workflow_created = False
 
-# Login page
 if not st.session_state.authenticated:
     st.title("🔐 eSign Hub Login")
     
@@ -60,7 +58,7 @@ if not st.session_state.authenticated:
                     st.error("Invalid username or password")
         
         st.markdown("---")
-        st.info("Demo Credentials:\n- Admin: etuk / password123\n- Manager: lawal / password123")
+        st.info("Login Credentials:\n- Admin: etuk / password123\n- Manager: lawal / password123\n- Approvers: jerome.das, partab.lalchandani, vinay.mahtani / password123")
 else:
     user = st.session_state.user
     
@@ -80,6 +78,7 @@ else:
             "🔗 Integrations": "Integrations",
             "📑 Audit Trail": "Audit",
             "➕ Add Team": "AddTeam",
+            "🗑️ Clear Workflows": "ClearDup",
         }
         
         for label, page in pages.items():
@@ -168,34 +167,41 @@ else:
         all_users = db.get_all_users()
         user_options = {u['full_name']: u['id'] for u in all_users if u['id'] != user['id']}
         
-        with st.form("create_workflow"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                title = st.text_input("Workflow Title*")
-                description = st.text_area("Description*")
-                platform = st.selectbox("Platform*", ["DocuSign", "HelloSign", "Microsoft 365", "Google Sign"])
-                priority = st.select_slider("Priority", ["Low", "Medium", "High", "Critical"])
-            
-            with col2:
-                approvers = st.multiselect("Select Approvers*", list(user_options.keys()))
-                expiration = st.number_input("Expiration (days)", 1, 90, 30)
-                uploaded_file = st.file_uploader("Upload Document", type=['pdf', 'doc', 'docx'])
-            
-            submitted = st.form_submit_button("Create Workflow", type="primary", use_container_width=True)
-            
-            if submitted:
-                if title and description and approvers:
-                    approver_ids = [user_options[name] for name in approvers]
-                    workflow_id = db.create_workflow(title, description, platform, user['id'], approver_ids, expiration)
-                    
-                    for approver_id in approver_ids:
-                        db.add_notification(approver_id, f"New workflow requires your approval: {title}", 'approval_required')
-                    
-                    st.success(f"✅ Workflow created! ID: {workflow_id}")
-                    st.rerun()
-                else:
-                    st.error("Please fill all required fields")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            title = st.text_input("Workflow Title*", key="wf_title")
+            description = st.text_area("Description*", key="wf_desc")
+            platform = st.selectbox("Platform*", ["DocuSign", "HelloSign", "Microsoft 365", "Google Sign"], key="wf_platform")
+            priority = st.select_slider("Priority", ["Low", "Medium", "High", "Critical"], key="wf_priority")
+        
+        with col2:
+            approvers = st.multiselect("Select Approvers*", list(user_options.keys()), key="wf_approvers")
+            expiration = st.number_input("Expiration (days)", 1, 90, 30, key="wf_expiration")
+            uploaded_file = st.file_uploader("Upload Document*", type=['pdf', 'doc', 'docx'], key="wf_file")
+        
+        if st.button("🚀 Create Workflow", type="primary", use_container_width=True, disabled=st.session_state.workflow_created):
+            if not title:
+                st.error("Please enter Workflow Title")
+            elif not description:
+                st.error("Please enter Description")
+            elif not approvers:
+                st.error("Please select at least one Approver")
+            elif not uploaded_file:
+                st.error("Please upload a document")
+            else:
+                approver_ids = [user_options[name] for name in approvers]
+                workflow_id = db.create_workflow(title, description, platform, user['id'], approver_ids, expiration)
+                
+                for approver_id in approver_ids:
+                    db.add_notification(approver_id, f"New workflow requires your approval: {title}", 'approval_required')
+                
+                st.session_state.workflow_created = True
+                st.success(f"✅ Workflow created! ID: {workflow_id}")
+                st.balloons()
+                time.sleep(2)
+                st.session_state.workflow_created = False
+                st.rerun()
     
     elif page == "Approvals":
         st.title("📋 My Approvals")
@@ -274,10 +280,22 @@ else:
                 ('USR-004', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
                 ('USR-005', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
             ]
-            for user in users:
-                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user)
+            for user_data in users:
+                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
             db.conn.commit()
             st.success("✅ Team members added! Go to Create Workflow to see them.")
+            st.rerun()
+    
+    elif page == "ClearDup":
+        st.title("🗑️ Clear All Workflows")
+        st.warning("This will delete ALL workflows, approvals, and audit trails.")
+        if st.button("Delete All Workflows", type="secondary"):
+            cursor = db.conn.cursor()
+            cursor.execute("DELETE FROM approvers")
+            cursor.execute("DELETE FROM workflows")
+            cursor.execute("DELETE FROM audit_trail")
+            db.conn.commit()
+            st.success("✅ All workflows cleared!")
             st.rerun()
     
     elif page == "Audit":
