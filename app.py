@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import hashlib
 
 sys.path.append(str(Path(__file__).parent))
 from database_setup import init_database
@@ -78,6 +79,7 @@ else:
             "📈 Analytics": "Analytics",
             "🔗 Integrations": "Integrations",
             "📑 Audit Trail": "Audit",
+            "➕ Add Team": "AddTeam",
         }
         
         for label, page in pages.items():
@@ -262,6 +264,21 @@ else:
     elif page == "Integrations":
         from components.integrations import render_integrations
         render_integrations()
+    
+    elif page == "AddTeam":
+        st.title("➕ Add Real Team Members")
+        if st.button("Add Jerome Das, Partab Lalchandani, Vinay Mahtani", type="primary"):
+            cursor = db.conn.cursor()
+            users = [
+                ('USR-003', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+                ('USR-004', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+                ('USR-005', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+            ]
+            for user in users:
+                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user)
+            db.conn.commit()
+            st.success("✅ Team members added! Go to Create Workflow to see them.")
+            st.rerun()
     
     elif page == "Audit":
         st.title("📑 Audit Trail")
