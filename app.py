@@ -7,11 +7,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 
-# Force database recreation on Streamlit Cloud
-if os.path.exists('esign_hub.db'):
-    os.remove('esign_hub.db')
-    print("Old database removed - creating fresh one with new users")
-
 sys.path.append(str(Path(__file__).parent))
 from database_setup import init_database
 from database_helper import Database
@@ -19,6 +14,7 @@ from database_helper import Database
 # Auto-create database if it doesn't exist
 if not os.path.exists('esign_hub.db'):
     init_database()
+
 # Page config
 st.set_page_config(
     page_title="eSign Hub - Digital Approvals",
