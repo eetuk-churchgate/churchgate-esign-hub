@@ -7,6 +7,20 @@ def render_integrations():
     st.title("🔗 Platform Integrations")
     db = Database()
     
+    # Auto-connect DocuSign from Streamlit Secrets if available
+    if hasattr(st, 'secrets') and 'DOCUSIGN_API_KEY' in st.secrets:
+        config = {
+            'api_key': st.secrets['DOCUSIGN_API_KEY'],
+            'account_id': st.secrets['DOCUSIGN_ACCOUNT_ID'],
+            'api_secret': st.secrets.get('DOCUSIGN_SECRET_KEY', ''),
+            'base_url': f"https://{st.secrets.get('DOCUSIGN_ENV', 'demo.docusign.net')}",
+            'connected': True,
+            'connected_at': datetime.now().isoformat()
+        }
+        cursor = db.conn.cursor()
+        cursor.execute('UPDATE platform_configs SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP WHERE platform_name = ?', (json.dumps(config), json.dumps(config), 'DocuSign'))
+        db.conn.commit()
+    
     st.markdown("""
     ### 🔑 Enter Your Real API Keys
     Once saved, these credentials work permanently for all future workflows.
