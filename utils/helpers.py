@@ -1,209 +1,97 @@
-﻿import sqlite3
-from datetime import datetime, timedelta
-import uuid
-import hashlib
+﻿import requests
 import json
+import base64
+from datetime import datetime
+import streamlit as st
 
-class Database:
-    def __init__(self):
-        self.conn = sqlite3.connect('esign_hub.db', check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
+    """Send document to DocuSign for real e-signatures"""
     
-    def verify_user(self, username, password):
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE username = ? AND password_hash = ? AND is_active = 1', 
-                      (username, password_hash))
-        user = cursor.fetchone()
-        if user:
-            cursor.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (user['id'],))
-            self.conn.commit()
-            return dict(user)
-        return None
+    # Get keys from Streamlit secrets
+    api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
+    account_id = st.secrets.get('DOCUSIGN_ACCOUNT_ID', '')
+    env = st.secrets.get('DOCUSIGN_ENV', 'demo.docusign.net')
     
-    def get_user_by_id(self, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-        user = cursor.fetchone()
-        return dict(user) if user else None
+    if not api_key or not account_id:
+        return False, "DocuSign not configured in Secrets"
     
-    def get_all_users(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE is_active = 1')
-        return [dict(row) for row in cursor.fetchall()]
+    base_url = f"https://{env}/restapi/v2.1/accounts/{account_id}"
     
-    def create_workflow(self, title, description, platform, initiator_id, approver_ids, expires_days=30):
-        workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
+    # Read document
+    try:
+        with open(document_path, 'rb') as f:
+            document_base64 = base64.b64encode(f.read()).decode('utf-8')
+    except:
+        return False, "Could not read document file"
+    
+    # Create envelope
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    envelope = {
+        "emailSubject": subject,
+        "documents": [{
+            "documentBase64": document_base64,
+            "name": document_path.split('/')[-1],
+            "fileExtension": "pdf",
+            "documentId": "1"
+        }],
+        "recipients": {
+            "signers": [{
+                "email": r['email'],
+                "name": r['name'],
+                "recipientId": str(i + 1),
+                "routingOrder": str(i + 1)
+            } for i, r in enumerate(recipients)]
+        },
+        "status": "sent"
+    }
+    
+    try:
+        response = requests.post(
+            f"{base_url}/envelopes",
+            headers=headers,
+            json=envelope
+        )
         
-        cursor.execute('''
-            INSERT INTO workflows (id, title, description, platform, status, initiator_id, expires_at)
-            VALUES (?, ?, ?, ?, 'pending', ?, ?)
-        ''', (workflow_id, title, description, platform, initiator_id, 
-              (datetime.now() + timedelta(days=expires_days)).isoformat()))
-        
-        for i, approver_id in enumerate(approver_ids):
-            approver_record_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
-            cursor.execute('''
-                INSERT INTO approvers (id, workflow_id, user_id, order_number, status)
-                VALUES (?, ?, ?, ?, 'pending')
-            ''', (approver_record_id, workflow_id, approver_id, i + 1))
-        
-        self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with {len(approver_ids)} approvers')
-        self.conn.commit()
-        return workflow_id
-    
-    def get_workflows_by_user(self, user_id, role):
-        cursor = self.conn.cursor()
-        if role == 'admin':
-            cursor.execute('''
-                SELECT w.*, u.full_name as initiator_name 
-                FROM workflows w 
-                JOIN users u ON w.initiator_id = u.id 
-                ORDER BY w.created_at DESC
-            ''')
+        if response.status_code == 201:
+            result = response.json()
+            return True, result['envelopeId']
         else:
-            cursor.execute('''
-                SELECT DISTINCT w.*, u.full_name as initiator_name 
-                FROM workflows w 
-                JOIN users u ON w.initiator_id = u.id 
-                LEFT JOIN approvers a ON w.id = a.workflow_id 
-                WHERE w.initiator_id = ? OR a.user_id = ?
-                ORDER BY w.created_at DESC
-            ''', (user_id, user_id))
-        
-        workflows = []
-        for row in cursor.fetchall():
-            workflow = dict(row)
-            cursor.execute('''
-                SELECT a.*, u.full_name, u.email 
-                FROM approvers a 
-                JOIN users u ON a.user_id = u.id 
-                WHERE a.workflow_id = ?
-                ORDER BY a.order_number
-            ''', (workflow['id'],))
-            workflow['approvers'] = [dict(a) for a in cursor.fetchall()]
-            workflows.append(workflow)
-        
-        return workflows
+            return False, response.text
+    except Exception as e:
+        return False, str(e)
+
+def get_signing_url(envelope_id, recipient_email, recipient_name):
+    """Get embedded signing URL"""
+    api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
+    account_id = st.secrets.get('DOCUSIGN_ACCOUNT_ID', '')
+    env = st.secrets.get('DOCUSIGN_ENV', 'demo.docusign.net')
     
-    def update_workflow_status(self, workflow_id, status, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('UPDATE workflows SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-                      (status, workflow_id))
-        if status == 'approved':
-            cursor.execute('UPDATE workflows SET completed_at = CURRENT_TIMESTAMP WHERE id = ?', (workflow_id,))
-        self.add_audit_entry(workflow_id, user_id, 'status_changed', f'Status changed to {status}')
-        self.conn.commit()
+    base_url = f"https://{env}/restapi/v2.1/accounts/{account_id}"
     
-    def sign_workflow(self, workflow_id, approver_id, comments=''):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE approvers 
-            SET status = 'signed', signed_at = CURRENT_TIMESTAMP, comments = ?
-            WHERE workflow_id = ? AND user_id = ? AND status = 'pending'
-        ''', (comments, workflow_id, approver_id))
-        
-        cursor.execute('''
-            SELECT COUNT(*) as total, 
-                   SUM(CASE WHEN status = 'signed' THEN 1 ELSE 0 END) as signed_count
-            FROM approvers 
-            WHERE workflow_id = ?
-        ''', (workflow_id,))
-        result = cursor.fetchone()
-        
-        if result['total'] == result['signed_count']:
-            self.update_workflow_status(workflow_id, 'approved', approver_id)
-        
-        self.add_audit_entry(workflow_id, approver_id, 'signed', f'Document signed with comments: {comments}')
-        self.conn.commit()
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
     
-    def add_audit_entry(self, workflow_id, user_id, action, details):
-        audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO audit_trail (id, workflow_id, user_id, action, details)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (audit_id, workflow_id, user_id, action, details))
-        self.conn.commit()
+    # Create recipient view
+    view_request = {
+        "returnUrl": st.get_option('server.baseUrlPath') or "https://churchgate-esign.streamlit.app",
+        "authenticationMethod": "none",
+        "email": recipient_email,
+        "userName": recipient_name,
+        "clientUserId": recipient_email
+    }
     
-    def get_audit_trail(self, workflow_id=None, limit=50):
-        cursor = self.conn.cursor()
-        if workflow_id:
-            cursor.execute('''
-                SELECT a.*, u.full_name 
-                FROM audit_trail a 
-                JOIN users u ON a.user_id = u.id 
-                WHERE a.workflow_id = ? 
-                ORDER BY a.timestamp DESC 
-                LIMIT ?
-            ''', (workflow_id, limit))
-        else:
-            cursor.execute('''
-                SELECT a.*, u.full_name, w.title as workflow_title
-                FROM audit_trail a 
-                JOIN users u ON a.user_id = u.id 
-                JOIN workflows w ON a.workflow_id = w.id 
-                ORDER BY a.timestamp DESC 
-                LIMIT ?
-            ''', (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+    response = requests.post(
+        f"{base_url}/envelopes/{envelope_id}/views/recipient",
+        headers=headers,
+        json=view_request
+    )
     
-    def add_notification(self, user_id, message, notification_type):
-        notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO notifications (id, user_id, message, type)
-            VALUES (?, ?, ?, ?)
-        ''', (notif_id, user_id, message, notification_type))
-        self.conn.commit()
-    
-    def get_notifications(self, user_id, limit=10):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM notifications 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC 
-            LIMIT ?
-        ''', (user_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
-    
-    def get_workflow_stats(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT status, COUNT(*) as count FROM workflows GROUP BY status')
-        status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
-        
-        cursor.execute('SELECT platform, COUNT(*) as count FROM workflows GROUP BY platform')
-        platform_counts = {row['platform']: row['count'] for row in cursor.fetchall()}
-        
-        cursor.execute('SELECT COUNT(*) as total FROM workflows')
-        total = cursor.fetchone()['total']
-        
-        cursor.execute('''
-            SELECT AVG(julianday(completed_at) - julianday(created_at)) as avg_days 
-            FROM workflows 
-            WHERE completed_at IS NOT NULL
-        ''')
-        avg_time = cursor.fetchone()['avg_days'] or 0
-        
-        return {
-            'total': total,
-            'status_counts': status_counts,
-            'platform_counts': platform_counts,
-            'avg_approval_time': round(avg_time, 1)
-        }
-    
-    def save_platform_config(self, platform_name, config):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE platform_configs 
-            SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP
-            WHERE platform_name = ?
-        ''', (json.dumps(config), json.dumps(config), platform_name))
-        self.conn.commit()
-    
-    def get_platform_config(self, platform_name):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM platform_configs WHERE platform_name = ? AND is_connected = 1', (platform_name,))
-        result = cursor.fetchone()
-        return json.loads(result['settings']) if result and result['settings'] else None
+    if response.status_code == 201:
+        return True, response.json()['url']
+    return False, None
