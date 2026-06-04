@@ -7,7 +7,6 @@ def init_database():
     conn = sqlite3.connect('esign_hub.db')
     cursor = conn.cursor()
     
-    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
@@ -23,7 +22,6 @@ def init_database():
         )
     ''')
     
-    # Workflows table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS workflows (
             id TEXT PRIMARY KEY,
@@ -42,7 +40,6 @@ def init_database():
         )
     ''')
     
-    # Approvers table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS approvers (
             id TEXT PRIMARY KEY,
@@ -57,7 +54,6 @@ def init_database():
         )
     ''')
     
-    # Audit trail table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_trail (
             id TEXT PRIMARY KEY,
@@ -72,7 +68,6 @@ def init_database():
         )
     ''')
     
-    # Notifications table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notifications (
             id TEXT PRIMARY KEY,
@@ -85,7 +80,6 @@ def init_database():
         )
     ''')
     
-    # Platform configurations table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS platform_configs (
             id TEXT PRIMARY KEY,
@@ -98,22 +92,24 @@ def init_database():
         )
     ''')
     
-    # Insert default users if not exist
-    default_users = [
-        ('USR-001', 'etuk', 'etuk@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Etuk', 'IT', 'admin'),
-        ('USR-002', 'lawal', 'lawal@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Lawal', 'Legal', 'manager'),
-        ('USR-005', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
-        ('USR-006', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
-        ('USR-007', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+    # Clear existing users
+    cursor.execute('DELETE FROM users')
+    
+    # Insert ONLY real team members
+    real_users = [
+        ('USR-001', 'etuk', 'etuk@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Etuk Admin', 'IT', 'admin'),
+        ('USR-002', 'lawal', 'lawal@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Lawal Manager', 'Legal', 'manager'),
+        ('USR-003', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+        ('USR-004', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+        ('USR-005', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
     ]
     
-    for user in default_users:
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', user)
+    for user in real_users:
+        cursor.execute('INSERT INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user)
     
-    # Insert platform configs
+    # Clear existing platform configs
+    cursor.execute('DELETE FROM platform_configs')
+    
     platforms = [
         ('PLT-001', 'DocuSign', '', 0, '{}', None),
         ('PLT-002', 'HelloSign', '', 0, '{}', None),
@@ -122,14 +118,11 @@ def init_database():
     ]
     
     for platform in platforms:
-        cursor.execute('''
-            INSERT OR IGNORE INTO platform_configs (id, platform_name, api_key, is_connected, settings, last_sync)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', platform)
+        cursor.execute('INSERT INTO platform_configs (id, platform_name, api_key, is_connected, settings, last_sync) VALUES (?, ?, ?, ?, ?, ?)', platform)
     
     conn.commit()
     conn.close()
-    print("Database initialized successfully!")
+    print("Database initialized with real team members!")
 
 if __name__ == "__main__":
     init_database()
