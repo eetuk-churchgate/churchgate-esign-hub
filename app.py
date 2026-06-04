@@ -200,6 +200,26 @@ else:
                 approver_ids = [user_options[name] for name in approvers]
                 workflow_id = db.create_workflow_with_doc(title, description, platform, user['id'], approver_ids, file_path, expiration)
                 
+                # Send to DocuSign if platform is DocuSign
+                if platform == "DocuSign":
+                    from utils.helpers import send_docusign_envelope
+                    
+                    recipients = []
+                    for approver_id in approver_ids:
+                        approver_data = db.get_user_by_id(approver_id)
+                        recipients.append({
+                            'email': approver_data['email'],
+                            'name': approver_data['full_name']
+                        })
+                    
+                    success, result = send_docusign_envelope(file_path, recipients, title)
+                    if success:
+                        st.success(f"✅ Document sent to DocuSign! Envelope ID: {result}")
+                        st.info("📧 Approvers will receive an email from DocuSign with a signing link.")
+                    else:
+                        st.warning(f"⚠️ DocuSign sending failed: {result}")
+                        st.info("But the workflow is still created for internal tracking.")
+                
                 for approver_id in approver_ids:
                     db.add_notification(approver_id, f"New workflow requires your approval: {title}", 'approval_required')
                 
@@ -224,6 +244,26 @@ else:
                         st.write(f"**Description:** {wf['description']}")
                         st.write(f"**Initiator:** {wf['initiator_name']}")
                         st.write(f"**Created:** {wf['created_at'][:10]}")
+                        
+                        # Document download
+                        if wf.get('document_path'):
+                            st.markdown("**📎 Attached Document:**")
+                            try:
+                                with open(wf['document_path'], 'rb') as doc_file:
+                                    st.download_button(
+                                        label="📥 Download Document to Review",
+                                        data=doc_file,
+                                        file_name=f"document_{wf['id']}.pdf",
+                                        mime="application/pdf",
+                                        key=f"doc_{wf['id']}"
+                                    )
+                            except:
+                                st.info("📎 Document available in DocuSign email")
+                        
+                        # DocuSign signing info
+                        if wf.get('platform') == 'DocuSign':
+                            st.markdown("### ✍️ Sign via DocuSign")
+                            st.info("📧 Check your email for the DocuSign signing link. Sign directly on DocuSign's secure platform.")
                         
                         col1, col2 = st.columns(2)
                         with col1:
