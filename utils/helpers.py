@@ -10,9 +10,11 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     account_id = st.secrets.get('DOCUSIGN_ACCOUNT_ID', '')
     api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
     env = st.secrets.get('DOCUSIGN_ENV', 'demo.docusign.net')
+    email = st.secrets.get('DOCUSIGN_EMAIL', '')
+    password = st.secrets.get('DOCUSIGN_PASSWORD', '')
     
-    if not account_id or not api_key:
-        return False, "DocuSign not configured in Secrets"
+    if not account_id or not api_key or not email or not password:
+        return False, "DocuSign not fully configured in Secrets"
     
     base_url = f"https://{env}/restapi/v2.1/accounts/{account_id}"
     
@@ -22,8 +24,15 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     except Exception as e:
         return False, f"Could not read document: {str(e)}"
     
+    # Legacy X-DocuSign-Authentication header
+    auth_header = json.dumps({
+        "Username": email,
+        "Password": password,
+        "IntegratorKey": api_key
+    })
+    
     headers = {
-        'Authorization': f'Bearer {api_key}',
+        'X-DocuSign-Authentication': auth_header,
         'Content-Type': 'application/json'
     }
     
@@ -56,8 +65,8 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
         
         if response.status_code == 201:
             result = response.json()
-            return True, f"Email sent to {recipients[0]['email']}! Envelope: {result['envelopeId']}"
+            return True, f"✅ Email sent! Envelope ID: {result['envelopeId']}"
         else:
-            return False, f"Error {response.status_code}: {response.text[:300]}"
+            return False, f"Error: {response.text[:300]}"
     except Exception as e:
         return False, str(e)
