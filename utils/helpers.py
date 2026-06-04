@@ -4,47 +4,15 @@ import base64
 from datetime import datetime
 import streamlit as st
 
-def get_docusign_token():
-    """Get OAuth token from DocuSign"""
-    api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
-    secret_key = st.secrets.get('DOCUSIGN_SECRET_KEY', '')
-    
-    if not api_key or not secret_key:
-        return None, "Missing DocuSign credentials in Secrets"
-    
-    auth_string = f"{api_key}:{secret_key}"
-    encoded_auth = base64.b64encode(auth_string.encode()).decode()
-    
-    response = requests.post(
-        "https://account-d.docusign.com/oauth/token",
-        headers={
-            "Authorization": f"Basic {encoded_auth}",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        data={
-            "grant_type": "client_credentials",
-            "scope": "signature impersonation"
-        }
-    )
-    
-    if response.status_code == 200:
-        token_data = response.json()
-        return token_data.get('access_token'), None
-    else:
-        return None, f"Auth Error: {response.text[:200]}"
-
 def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     """Send document to DocuSign for real e-signatures"""
     
     account_id = st.secrets.get('DOCUSIGN_ACCOUNT_ID', '')
+    api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
     env = st.secrets.get('DOCUSIGN_ENV', 'demo.docusign.net')
     
-    if not account_id:
-        return False, "DocuSign Account ID not configured in Secrets"
-    
-    token, error = get_docusign_token()
-    if not token:
-        return False, f"Authentication failed: {error}"
+    if not account_id or not api_key:
+        return False, "DocuSign not configured in Secrets"
     
     base_url = f"https://{env}/restapi/v2.1/accounts/{account_id}"
     
@@ -55,7 +23,7 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
         return False, f"Could not read document: {str(e)}"
     
     headers = {
-        'Authorization': f'Bearer {token}',
+        'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json'
     }
     
@@ -64,7 +32,7 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
         "emailBlurb": "Please review and sign this document.",
         "documents": [{
             "documentBase64": document_base64,
-            "name": document_path.split('/')[-1].split('\\')[-1],
+            "name": "document.pdf",
             "fileExtension": "pdf",
             "documentId": "1"
         }],
@@ -73,15 +41,7 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
                 "email": r['email'],
                 "name": r['name'],
                 "recipientId": str(i + 1),
-                "routingOrder": str(i + 1),
-                "tabs": {
-                    "signHereTabs": [{
-                        "documentId": "1",
-                        "pageNumber": "1",
-                        "xPosition": "100",
-                        "yPosition": "100"
-                    }]
-                }
+                "routingOrder": str(i + 1)
             } for i, r in enumerate(recipients)]
         },
         "status": "sent"
@@ -96,9 +56,8 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
         
         if response.status_code == 201:
             result = response.json()
-            envelope_id = result['envelopeId']
-            return True, f"Envelope sent! ID: {envelope_id}. Check email at {recipients[0]['email']}"
+            return True, f"Email sent to {recipients[0]['email']}! Envelope: {result['envelopeId']}"
         else:
-            return False, f"API Error: {response.text[:200]}"
+            return False, f"Error {response.status_code}: {response.text[:300]}"
     except Exception as e:
         return False, str(e)
