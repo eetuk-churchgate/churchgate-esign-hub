@@ -99,13 +99,13 @@ def init_database():
     ''')
     
     # Insert default users if not exist
-default_users = [
-    ('USR-001', 'etuk', 'etuk@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Etuk', 'IT', 'admin'),
-    ('USR-002', 'lawal', 'lawal@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Lawal', 'Legal', 'manager'),
-    ('USR-005', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
-    ('USR-006', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
-    ('USR-007', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
-]
+    default_users = [
+        ('USR-001', 'etuk', 'etuk@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Etuk', 'IT', 'admin'),
+        ('USR-002', 'lawal', 'lawal@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Lawal', 'Legal', 'manager'),
+        ('USR-005', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+        ('USR-006', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+        ('USR-007', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+    ]
     
     for user in default_users:
         cursor.execute('''
