@@ -34,7 +34,9 @@ def render_integrations():
                     'connected': True,
                     'connected_at': datetime.now().isoformat()
                 }
-                db.save_platform_config('DocuSign', config)
+                cursor = db.conn.cursor()
+                cursor.execute('UPDATE platform_configs SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP WHERE platform_name = ?', (json.dumps(config), json.dumps(config), 'DocuSign'))
+                db.conn.commit()
                 st.success("✅ DocuSign connected PERMANENTLY!")
                 st.rerun()
             else:
@@ -43,18 +45,13 @@ def render_integrations():
     # HelloSign Integration
     with st.expander("✍️ HelloSign", expanded=False):
         st.markdown("[Get Free API Key →](https://www.hellosign.com/developers)")
-        
         hellosign_key = st.text_input("HelloSign API Key", type="password", key="hs_key")
-        
         if st.button("💾 Save & Connect HelloSign", type="primary", key="save_hs"):
             if hellosign_key:
-                config = {
-                    'api_key': hellosign_key,
-                    'base_url': 'https://api.hellosign.com/v3',
-                    'connected': True,
-                    'connected_at': datetime.now().isoformat()
-                }
-                db.save_platform_config('HelloSign', config)
+                config = {'api_key': hellosign_key, 'base_url': 'https://api.hellosign.com/v3', 'connected': True, 'connected_at': datetime.now().isoformat()}
+                cursor = db.conn.cursor()
+                cursor.execute('UPDATE platform_configs SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP WHERE platform_name = ?', (json.dumps(config), json.dumps(config), 'HelloSign'))
+                db.conn.commit()
                 st.success("✅ HelloSign connected!")
                 st.rerun()
             else:
@@ -63,24 +60,18 @@ def render_integrations():
     # Microsoft 365 Integration
     with st.expander("🔷 Microsoft 365", expanded=False):
         st.markdown("[Get Free Developer Account →](https://developer.microsoft.com/microsoft-365/dev-program)")
-        
         col1, col2 = st.columns(2)
         with col1:
             ms_client_id = st.text_input("Azure Client ID", key="ms_client")
             ms_tenant_id = st.text_input("Azure Tenant ID", key="ms_tenant")
         with col2:
             ms_client_secret = st.text_input("Azure Client Secret", type="password", key="ms_secret")
-        
         if st.button("💾 Save & Connect Microsoft 365", type="primary", key="save_ms"):
             if ms_client_id and ms_tenant_id:
-                config = {
-                    'client_id': ms_client_id,
-                    'tenant_id': ms_tenant_id,
-                    'client_secret': ms_client_secret,
-                    'connected': True,
-                    'connected_at': datetime.now().isoformat()
-                }
-                db.save_platform_config('Microsoft 365', config)
+                config = {'client_id': ms_client_id, 'tenant_id': ms_tenant_id, 'client_secret': ms_client_secret, 'connected': True, 'connected_at': datetime.now().isoformat()}
+                cursor = db.conn.cursor()
+                cursor.execute('UPDATE platform_configs SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP WHERE platform_name = ?', (json.dumps(config), json.dumps(config), 'Microsoft 365'))
+                db.conn.commit()
                 st.success("✅ Microsoft 365 connected!")
                 st.rerun()
             else:
@@ -89,44 +80,32 @@ def render_integrations():
     # Google Sign Integration
     with st.expander("📱 Google Sign", expanded=False):
         st.markdown("[Get Free API Credentials →](https://console.cloud.google.com/)")
-        
         col1, col2 = st.columns(2)
         with col1:
             google_client_id = st.text_input("Google Client ID", key="g_client")
         with col2:
             google_client_secret = st.text_input("Google Client Secret", type="password", key="g_secret")
-        
         if st.button("💾 Save & Connect Google", type="primary", key="save_g"):
             if google_client_id:
-                config = {
-                    'client_id': google_client_id,
-                    'client_secret': google_client_secret,
-                    'connected': True,
-                    'connected_at': datetime.now().isoformat()
-                }
-                db.save_platform_config('Google Sign', config)
+                config = {'client_id': google_client_id, 'client_secret': google_client_secret, 'connected': True, 'connected_at': datetime.now().isoformat()}
+                cursor = db.conn.cursor()
+                cursor.execute('UPDATE platform_configs SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP WHERE platform_name = ?', (json.dumps(config), json.dumps(config), 'Google Sign'))
+                db.conn.commit()
                 st.success("✅ Google Sign connected!")
                 st.rerun()
             else:
                 st.error("Please provide Client ID")
     
-    # Show connection status from database
+    # Show connection status
     st.markdown("---")
     st.subheader("📊 Current Integration Status")
-    
     cursor = db.conn.cursor()
     cursor.execute('SELECT platform_name, is_connected, last_sync FROM platform_configs')
     platforms = cursor.fetchall()
-    
     if platforms:
         cols = st.columns(len(platforms))
         for i, platform in enumerate(platforms):
             with cols[i]:
-                if platform['is_connected']:
-                    status = "🟢 Connected"
-                else:
-                    status = "⚪ Not Connected"
+                status = "🟢 Connected" if platform['is_connected'] else "⚪ Not Connected"
                 last = platform['last_sync'][:10] if platform['last_sync'] else "Never"
                 st.metric(platform['platform_name'], status, f"Since: {last}")
-    else:
-        st.info("No platforms configured yet. Add your API keys above.")
