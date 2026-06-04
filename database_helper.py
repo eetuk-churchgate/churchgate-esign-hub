@@ -57,6 +57,28 @@ class Database:
         
         self.conn.commit()
         return workflow_id
+
+
+def create_workflow_with_doc(self, title, description, platform, initiator_id, approver_ids, document_path, expires_days=30):
+        workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
+        cursor = self.conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO workflows (id, title, description, platform, status, initiator_id, document_path, expires_at)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+        ''', (workflow_id, title, description, platform, initiator_id, document_path,
+              (datetime.now() + timedelta(days=expires_days)).isoformat()))
+        
+        for i, approver_id in enumerate(approver_ids):
+            approver_record_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
+            cursor.execute('''
+                INSERT INTO approvers (id, workflow_id, user_id, order_number, status)
+                VALUES (?, ?, ?, ?, 'pending')
+            ''', (approver_record_id, workflow_id, approver_id, i + 1))
+        
+        self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with document: {document_path}')
+        self.conn.commit()
+        return workflow_id
     
     def get_workflows_by_user(self, user_id, role):
         cursor = self.conn.cursor()

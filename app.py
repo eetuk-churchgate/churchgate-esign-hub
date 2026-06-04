@@ -190,8 +190,15 @@ else:
             elif not uploaded_file:
                 st.error("Please upload a document")
             else:
+                # Save uploaded file
+                upload_dir = "uploads"
+                os.makedirs(upload_dir, exist_ok=True)
+                file_path = os.path.join(upload_dir, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uploaded_file.name}")
+                with open(file_path, 'wb') as f:
+                    f.write(uploaded_file.getbuffer())
+                
                 approver_ids = [user_options[name] for name in approvers]
-                workflow_id = db.create_workflow(title, description, platform, user['id'], approver_ids, expiration)
+                workflow_id = db.create_workflow_with_doc(title, description, platform, user['id'], approver_ids, file_path, expiration)
                 
                 for approver_id in approver_ids:
                     db.add_notification(approver_id, f"New workflow requires your approval: {title}", 'approval_required')
