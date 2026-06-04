@@ -1,5 +1,4 @@
-﻿@"
-import streamlit as st
+﻿import streamlit as st
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -60,11 +59,7 @@ if not st.session_state.authenticated:
                     st.error("Invalid username or password")
         
         st.markdown("---")
-        st.info("""
-        **Demo Credentials:**
-        - Admin: `etuk` / `password123`
-        - Manager: `lawal` / `password123`
-        """)
+        st.info("Demo Credentials:\n- Admin: etuk / password123\n- Manager: lawal / password123")
 else:
     user = st.session_state.user
     
@@ -292,4 +287,3 @@ else:
 if st.session_state.get('authenticated'):
     st.sidebar.markdown("---")
     st.sidebar.caption("Paperless • Trackable • Efficient")
-"@ | Out-File -FilePath app.py -Encoding UTF8
