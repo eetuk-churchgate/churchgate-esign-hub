@@ -2,7 +2,6 @@
 from datetime import datetime, timedelta
 import uuid
 import hashlib
-import streamlit as st
 import json
 
 class Database:
@@ -10,7 +9,6 @@ class Database:
         self.conn = sqlite3.connect('esign_hub.db', check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
     
-    # User operations
     def verify_user(self, username, password):
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         cursor = self.conn.cursor()
@@ -34,7 +32,6 @@ class Database:
         cursor.execute('SELECT * FROM users WHERE is_active = 1')
         return [dict(row) for row in cursor.fetchall()]
     
-    # Workflow operations
     def create_workflow(self, title, description, platform, initiator_id, approver_ids, expires_days=30):
         workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -53,7 +50,6 @@ class Database:
             ''', (approver_record_id, workflow_id, approver_id, i + 1))
         
         self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with {len(approver_ids)} approvers')
-        
         self.conn.commit()
         return workflow_id
     
@@ -122,7 +118,6 @@ class Database:
         self.add_audit_entry(workflow_id, approver_id, 'signed', f'Document signed with comments: {comments}')
         self.conn.commit()
     
-    # Audit operations
     def add_audit_entry(self, workflow_id, user_id, action, details):
         audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -154,7 +149,6 @@ class Database:
             ''', (limit,))
         return [dict(row) for row in cursor.fetchall()]
     
-    # Notification operations
     def add_notification(self, user_id, message, notification_type):
         notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -199,7 +193,6 @@ class Database:
             'avg_approval_time': round(avg_time, 1)
         }
     
-    # Platform configuration operations
     def save_platform_config(self, platform_name, config):
         cursor = self.conn.cursor()
         cursor.execute('''
