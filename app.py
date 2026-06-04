@@ -318,19 +318,33 @@ else:
         from components.integrations import render_integrations
         render_integrations()
     
-    elif page == "AddTeam":
+     elif page == "AddTeam":
         st.title("➕ Add Real Team Members")
-        if st.button("Add Jerome Das, Partab Lalchandani, Vinay Mahtani", type="primary"):
+        if st.button("Add All Team Members with Real Emails", type="primary"):
             cursor = db.conn.cursor()
+            # Delete old test users
+            cursor.execute("DELETE FROM users WHERE username IN ('john.doe', 'jane.smith')")
+            # Add/update ALL real team members
             users = [
-                ('USR-003', 'jerome.das', 'jerome.das@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
-                ('USR-004', 'partab.lalchandani', 'partab.lalchandani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
-                ('USR-005', 'vinay.mahtani', 'vinay.mahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+                ('USR-003', 'jerome.das', 'Jeromedas@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+                ('USR-004', 'partab.lalchandani', 'partab@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+                ('USR-005', 'vinay.mahtani', 'vbmahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
             ]
             for user_data in users:
                 cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
+            # Update existing users with real emails
+            cursor.execute("UPDATE users SET email = 'eetuk@churchgate.com' WHERE username = 'etuk'")
+            cursor.execute("UPDATE users SET email = 'lawal@churchgate.com' WHERE username = 'lawal'")
             db.conn.commit()
-            st.success("✅ Team members added! Go to Create Workflow to see them.")
+            st.success("✅ All team members added with real emails!")
+            st.info("""
+            **Login Credentials:**
+            - Etuk: etuk / password123 (eetuk@churchgate.com)
+            - Lawal: lawal / password123 (lawal@churchgate.com)
+            - Jerome: jerome.das / password123 (Jeromedas@churchgate.com)
+            - Partab: partab.lalchandani / password123 (partab@churchgate.com)
+            - Vinay: vinay.mahtani / password123 (vbmahtani@churchgate.com)
+            """)
             st.rerun()
     
     elif page == "ClearDup":

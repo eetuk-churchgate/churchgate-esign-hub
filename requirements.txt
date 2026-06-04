@@ -6,3 +6,7 @@ requests
 streamlit-authenticator
 pyyaml
 bcrypt
+P y J W T = = 2 . 8 . 0 
+PyJWT==2.8.0
+ 
+ 
