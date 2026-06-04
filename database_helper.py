@@ -2,14 +2,13 @@
 from datetime import datetime, timedelta
 import uuid
 import hashlib
-import streamlit as st
+import json
 
 class Database:
     def __init__(self):
         self.conn = sqlite3.connect('esign_hub.db', check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
     
-    # User operations
     def verify_user(self, username, password):
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         cursor = self.conn.cursor()
@@ -33,7 +32,6 @@ class Database:
         cursor.execute('SELECT * FROM users WHERE is_active = 1')
         return [dict(row) for row in cursor.fetchall()]
     
-    # Workflow operations
     def create_workflow(self, title, description, platform, initiator_id, approver_ids, expires_days=30):
         workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -44,7 +42,6 @@ class Database:
         ''', (workflow_id, title, description, platform, initiator_id, 
               (datetime.now() + timedelta(days=expires_days)).isoformat()))
         
-        # Add approvers
         for i, approver_id in enumerate(approver_ids):
             approver_record_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
             cursor.execute('''
@@ -52,14 +49,11 @@ class Database:
                 VALUES (?, ?, ?, ?, 'pending')
             ''', (approver_record_id, workflow_id, approver_id, i + 1))
         
-        # Add audit entry
         self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with {len(approver_ids)} approvers')
-        
         self.conn.commit()
         return workflow_id
-
-
-def create_workflow_with_doc(self, title, description, platform, initiator_id, approver_ids, document_path, expires_days=30):
+    
+    def create_workflow_with_doc(self, title, description, platform, initiator_id, approver_ids, document_path, expires_days=30):
         workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
         
@@ -90,7 +84,6 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
                 ORDER BY w.created_at DESC
             ''')
         else:
-            # User can see workflows they initiated or need to approve
             cursor.execute('''
                 SELECT DISTINCT w.*, u.full_name as initiator_name 
                 FROM workflows w 
@@ -103,7 +96,6 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
         workflows = []
         for row in cursor.fetchall():
             workflow = dict(row)
-            # Get approvers for this workflow
             cursor.execute('''
                 SELECT a.*, u.full_name, u.email 
                 FROM approvers a 
@@ -122,7 +114,7 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
                       (status, workflow_id))
         if status == 'approved':
             cursor.execute('UPDATE workflows SET completed_at = CURRENT_TIMESTAMP WHERE id = ?', (workflow_id,))
-        self.add_audit_entry(workflow_id, user_id, f'status_changed', f'Status changed to {status}')
+        self.add_audit_entry(workflow_id, user_id, 'status_changed', f'Status changed to {status}')
         self.conn.commit()
     
     def sign_workflow(self, workflow_id, approver_id, comments=''):
@@ -133,7 +125,6 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
             WHERE workflow_id = ? AND user_id = ? AND status = 'pending'
         ''', (comments, workflow_id, approver_id))
         
-        # Check if all approvers have signed
         cursor.execute('''
             SELECT COUNT(*) as total, 
                    SUM(CASE WHEN status = 'signed' THEN 1 ELSE 0 END) as signed_count
@@ -148,7 +139,6 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
         self.add_audit_entry(workflow_id, approver_id, 'signed', f'Document signed with comments: {comments}')
         self.conn.commit()
     
-    # Audit operations
     def add_audit_entry(self, workflow_id, user_id, action, details):
         audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -180,7 +170,6 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
             ''', (limit,))
         return [dict(row) for row in cursor.fetchall()]
     
-    # Notification operations
     def add_notification(self, user_id, message, notification_type):
         notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
         cursor = self.conn.cursor()
@@ -224,3 +213,18 @@ def create_workflow_with_doc(self, title, description, platform, initiator_id, a
             'platform_counts': platform_counts,
             'avg_approval_time': round(avg_time, 1)
         }
+    
+    def save_platform_config(self, platform_name, config):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE platform_configs 
+            SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP
+            WHERE platform_name = ?
+        ''', (json.dumps(config), json.dumps(config), platform_name))
+        self.conn.commit()
+    
+    def get_platform_config(self, platform_name):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM platform_configs WHERE platform_name = ? AND is_connected = 1', (platform_name,))
+        result = cursor.fetchone()
+        return json.loads(result['settings']) if result and result['settings'] else None
