@@ -1,36 +1,48 @@
 ﻿import requests
 import json
 import base64
+import jwt
+import time
 from datetime import datetime
 import streamlit as st
 
 def get_docusign_token():
-    """Get OAuth token using client credentials"""
+    """Get JWT token from DocuSign"""
     api_key = st.secrets.get('DOCUSIGN_API_KEY', '')
-    secret_key = st.secrets.get('DOCUSIGN_SECRET_KEY', '')
+    user_id = st.secrets.get('DOCUSIGN_USER_ID', '')
+    private_key = st.secrets.get('DOCUSIGN_RSA_PRIVATE_KEY', '')
     
-    if not api_key or not secret_key:
-        return None, "Missing credentials"
+    if not api_key or not user_id or not private_key:
+        return None, "Missing credentials in Secrets"
     
-    # Encode client_id:client_secret
-    auth_string = f"{api_key}:{secret_key}"
-    encoded = base64.b64encode(auth_string.encode()).decode()
+    # Create JWT assertion
+    current_time = int(time.time())
+    payload = {
+        "iss": api_key,
+        "sub": user_id,
+        "aud": "account-d.docusign.com",
+        "iat": current_time,
+        "exp": current_time + 3600,
+        "scope": "signature impersonation"
+    }
     
-    response = requests.post(
-        "https://account-d.docusign.com/oauth/token",
-        headers={
-            "Authorization": f"Basic {encoded}",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        data={
-            "grant_type": "client_credentials",
-            "scope": "signature"
-        }
-    )
-    
-    if response.status_code == 200:
-        return response.json().get('access_token'), None
-    return None, response.text
+    try:
+        token = jwt.encode(payload, private_key, algorithm="RS256")
+        
+        response = requests.post(
+            "https://account-d.docusign.com/oauth/token",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": token
+            }
+        )
+        
+        if response.status_code == 200:
+            return response.json().get('access_token'), None
+        return None, f"JWT Error: {response.text}"
+    except Exception as e:
+        return None, str(e)
 
 def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     account_id = st.secrets.get('DOCUSIGN_ACCOUNT_ID', '')
@@ -48,8 +60,8 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     try:
         with open(document_path, 'rb') as f:
             doc_b64 = base64.b64encode(f.read()).decode('utf-8')
-    except Exception as e:
-        return False, str(e)
+    except:
+        return False, "Cannot read file"
     
     envelope = {
         "emailSubject": subject,
@@ -64,8 +76,7 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
             "signers": [{
                 "email": r['email'],
                 "name": r['name'],
-                "recipientId": str(i + 1),
-                "routingOrder": str(i + 1)
+                "recipientId": str(i+1)
             } for i, r in enumerate(recipients)]
         },
         "status": "sent"
@@ -74,15 +85,11 @@ def send_docusign_envelope(document_path, recipients, subject="Please Sign"):
     try:
         response = requests.post(
             f"{base_url}/envelopes",
-            headers={
-                'Authorization': f'Bearer {token}',
-                'Content-Type': 'application/json'
-            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=envelope
         )
-        
         if response.status_code == 201:
-            return True, f"✅ Sent! Envelope: {response.json()['envelopeId']}"
-        return False, f"Error: {response.text[:300]}"
+            return True, f"Sent! ID: {response.json()['envelopeId']}"
+        return False, response.text[:300]
     except Exception as e:
         return False, str(e)
