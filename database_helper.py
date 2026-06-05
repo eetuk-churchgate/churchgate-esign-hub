@@ -1,4 +1,5 @@
-﻿import sqlite3
+﻿import streamlit as st
+from supabase import create_client
 from datetime import datetime, timedelta
 import uuid
 import hashlib
@@ -6,225 +7,192 @@ import json
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('esign_hub.db', check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+        self.url = st.secrets.get('SUPABASE_URL', '')
+        self.key = st.secrets.get('SUPABASE_KEY', '')
+        if self.url and self.key:
+            self.client = create_client(self.url, self.key)
+        else:
+            self.client = None
     
     def verify_user(self, username, password):
+        if not self.client:
+            return None
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE username = ? AND password_hash = ? AND is_active = 1', 
-                      (username, password_hash))
-        user = cursor.fetchone()
-        if user:
-            cursor.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (user['id'],))
-            self.conn.commit()
-            return dict(user)
+        result = self.client.table('users').select('*').eq('username', username).eq('password_hash', password_hash).execute()
+        if result.data:
+            return result.data[0]
         return None
     
     def get_user_by_id(self, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-        user = cursor.fetchone()
-        return dict(user) if user else None
+        if not self.client:
+            return None
+        result = self.client.table('users').select('*').eq('id', user_id).execute()
+        return result.data[0] if result.data else None
     
     def get_all_users(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE is_active = 1')
-        return [dict(row) for row in cursor.fetchall()]
+        if not self.client:
+            return []
+        result = self.client.table('users').select('*').execute()
+        return result.data
     
     def create_workflow(self, title, description, platform, initiator_id, approver_ids, expires_days=30):
+        if not self.client:
+            return None
         workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO workflows (id, title, description, platform, status, initiator_id, expires_at)
-            VALUES (?, ?, ?, ?, 'pending', ?, ?)
-        ''', (workflow_id, title, description, platform, initiator_id, 
-              (datetime.now() + timedelta(days=expires_days)).isoformat()))
+        workflow = {
+            'id': workflow_id,
+            'title': title,
+            'description': description,
+            'platform': platform,
+            'status': 'pending',
+            'initiator_id': initiator_id,
+            'document_path': None,
+            'priority': 'Medium',
+            'created_at': datetime.now().isoformat(),
+            'expires_at': (datetime.now() + timedelta(days=expires_days)).isoformat(),
+            'completed_at': None
+        }
+        self.client.table('workflows').insert(workflow).execute()
         
         for i, approver_id in enumerate(approver_ids):
-            approver_record_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
-            cursor.execute('''
-                INSERT INTO approvers (id, workflow_id, user_id, order_number, status)
-                VALUES (?, ?, ?, ?, 'pending')
-            ''', (approver_record_id, workflow_id, approver_id, i + 1))
+            approver = {
+                'id': f"APR-{uuid.uuid4().hex[:8].upper()}",
+                'workflow_id': workflow_id,
+                'user_id': approver_id,
+                'order_number': i + 1,
+                'status': 'pending',
+                'signed_at': None,
+                'comments': ''
+            }
+            self.client.table('approvers').insert(approver).execute()
         
-        self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with {len(approver_ids)} approvers')
-        self.conn.commit()
         return workflow_id
     
     def create_workflow_with_doc(self, title, description, platform, initiator_id, approver_ids, document_path, expires_days=30):
-        workflow_id = f"WF-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO workflows (id, title, description, platform, status, initiator_id, document_path, expires_at)
-            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
-        ''', (workflow_id, title, description, platform, initiator_id, document_path,
-              (datetime.now() + timedelta(days=expires_days)).isoformat()))
-        
-        for i, approver_id in enumerate(approver_ids):
-            approver_record_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
-            cursor.execute('''
-                INSERT INTO approvers (id, workflow_id, user_id, order_number, status)
-                VALUES (?, ?, ?, ?, 'pending')
-            ''', (approver_record_id, workflow_id, approver_id, i + 1))
-        
-        self.add_audit_entry(workflow_id, initiator_id, 'created', f'Workflow created with document: {document_path}')
-        self.conn.commit()
+        workflow_id = self.create_workflow(title, description, platform, initiator_id, approver_ids, expires_days)
+        if workflow_id and self.client:
+            self.client.table('workflows').update({'document_path': document_path}).eq('id', workflow_id).execute()
         return workflow_id
     
     def get_workflows_by_user(self, user_id, role):
-        cursor = self.conn.cursor()
-        if role == 'admin':
-            cursor.execute('''
-                SELECT w.*, u.full_name as initiator_name 
-                FROM workflows w 
-                JOIN users u ON w.initiator_id = u.id 
-                ORDER BY w.created_at DESC
-            ''')
-        else:
-            cursor.execute('''
-                SELECT DISTINCT w.*, u.full_name as initiator_name 
-                FROM workflows w 
-                JOIN users u ON w.initiator_id = u.id 
-                LEFT JOIN approvers a ON w.id = a.workflow_id 
-                WHERE w.initiator_id = ? OR a.user_id = ?
-                ORDER BY w.created_at DESC
-            ''', (user_id, user_id))
+        if not self.client:
+            return []
         
-        workflows = []
-        for row in cursor.fetchall():
-            workflow = dict(row)
-            cursor.execute('''
-                SELECT a.*, u.full_name, u.email 
-                FROM approvers a 
-                JOIN users u ON a.user_id = u.id 
-                WHERE a.workflow_id = ?
-                ORDER BY a.order_number
-            ''', (workflow['id'],))
-            workflow['approvers'] = [dict(a) for a in cursor.fetchall()]
-            workflows.append(workflow)
+        if role == 'admin':
+            result = self.client.table('workflows').select('*').order('created_at', desc=True).execute()
+        else:
+            result = self.client.table('workflows').select('*').or_(f'initiator_id.eq.{user_id}').order('created_at', desc=True).execute()
+        
+        workflows = result.data
+        
+        for wf in workflows:
+            approvers_result = self.client.table('approvers').select('*, users!inner(full_name, email)').eq('workflow_id', wf['id']).execute()
+            wf['approvers'] = []
+            for a in approvers_result.data:
+                approver_data = {
+                    'id': a['id'],
+                    'workflow_id': a['workflow_id'],
+                    'user_id': a['user_id'],
+                    'status': a['status'],
+                    'signed_at': a['signed_at'],
+                    'comments': a.get('comments', ''),
+                    'full_name': a.get('users', {}).get('full_name', ''),
+                    'email': a.get('users', {}).get('email', '')
+                }
+                wf['approvers'].append(approver_data)
+            
+            initiator = self.get_user_by_id(wf['initiator_id'])
+            wf['initiator_name'] = initiator['full_name'] if initiator else ''
         
         return workflows
     
-    def update_workflow_status(self, workflow_id, status, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('UPDATE workflows SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-                      (status, workflow_id))
-        if status == 'approved':
-            cursor.execute('UPDATE workflows SET completed_at = CURRENT_TIMESTAMP WHERE id = ?', (workflow_id,))
-        self.add_audit_entry(workflow_id, user_id, 'status_changed', f'Status changed to {status}')
-        self.conn.commit()
-    
     def sign_workflow(self, workflow_id, approver_id, comments=''):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE approvers 
-            SET status = 'signed', signed_at = CURRENT_TIMESTAMP, comments = ?
-            WHERE workflow_id = ? AND user_id = ? AND status = 'pending'
-        ''', (comments, workflow_id, approver_id))
+        if not self.client:
+            return
+        self.client.table('approvers').update({
+            'status': 'signed',
+            'signed_at': datetime.now().isoformat(),
+            'comments': comments
+        }).eq('workflow_id', workflow_id).eq('user_id', approver_id).execute()
         
-        cursor.execute('''
-            SELECT COUNT(*) as total, 
-                   SUM(CASE WHEN status = 'signed' THEN 1 ELSE 0 END) as signed_count
-            FROM approvers 
-            WHERE workflow_id = ?
-        ''', (workflow_id,))
-        result = cursor.fetchone()
-        
-        if result['total'] == result['signed_count']:
-            self.update_workflow_status(workflow_id, 'approved', approver_id)
-        
-        self.add_audit_entry(workflow_id, approver_id, 'signed', f'Document signed with comments: {comments}')
-        self.conn.commit()
+        # Check if all signed
+        approvers = self.client.table('approvers').select('*').eq('workflow_id', workflow_id).execute()
+        if all(a['status'] == 'signed' for a in approvers.data):
+            self.client.table('workflows').update({
+                'status': 'approved',
+                'completed_at': datetime.now().isoformat()
+            }).eq('id', workflow_id).execute()
     
-    def add_audit_entry(self, workflow_id, user_id, action, details):
-        audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO audit_trail (id, workflow_id, user_id, action, details)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (audit_id, workflow_id, user_id, action, details))
-        self.conn.commit()
-    
-    def get_audit_trail(self, workflow_id=None, limit=50):
-        cursor = self.conn.cursor()
-        if workflow_id:
-            cursor.execute('''
-                SELECT a.*, u.full_name 
-                FROM audit_trail a 
-                JOIN users u ON a.user_id = u.id 
-                WHERE a.workflow_id = ? 
-                ORDER BY a.timestamp DESC 
-                LIMIT ?
-            ''', (workflow_id, limit))
-        else:
-            cursor.execute('''
-                SELECT a.*, u.full_name, w.title as workflow_title
-                FROM audit_trail a 
-                JOIN users u ON a.user_id = u.id 
-                JOIN workflows w ON a.workflow_id = w.id 
-                ORDER BY a.timestamp DESC 
-                LIMIT ?
-            ''', (limit,))
-        return [dict(row) for row in cursor.fetchall()]
+    def update_workflow_status(self, workflow_id, status, user_id):
+        if not self.client:
+            return
+        self.client.table('workflows').update({'status': status}).eq('id', workflow_id).execute()
     
     def add_notification(self, user_id, message, notification_type):
-        notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO notifications (id, user_id, message, type)
-            VALUES (?, ?, ?, ?)
-        ''', (notif_id, user_id, message, notification_type))
-        self.conn.commit()
+        pass
     
     def get_notifications(self, user_id, limit=10):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM notifications 
-            WHERE user_id = ? 
-            ORDER BY created_at DESC 
-            LIMIT ?
-        ''', (user_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
+        return []
     
     def get_workflow_stats(self):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT status, COUNT(*) as count FROM workflows GROUP BY status')
-        status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
+        if not self.client:
+            return {'total': 0, 'status_counts': {}, 'platform_counts': {}, 'avg_approval_time': 0}
         
-        cursor.execute('SELECT platform, COUNT(*) as count FROM workflows GROUP BY platform')
-        platform_counts = {row['platform']: row['count'] for row in cursor.fetchall()}
+        workflows = self.client.table('workflows').select('*').execute().data
         
-        cursor.execute('SELECT COUNT(*) as total FROM workflows')
-        total = cursor.fetchone()['total']
-        
-        cursor.execute('''
-            SELECT AVG(julianday(completed_at) - julianday(created_at)) as avg_days 
-            FROM workflows 
-            WHERE completed_at IS NOT NULL
-        ''')
-        avg_time = cursor.fetchone()['avg_days'] or 0
+        status_counts = {}
+        platform_counts = {}
+        for wf in workflows:
+            status_counts[wf['status']] = status_counts.get(wf['status'], 0) + 1
+            platform_counts[wf['platform']] = platform_counts.get(wf['platform'], 0) + 1
         
         return {
-            'total': total,
+            'total': len(workflows),
             'status_counts': status_counts,
             'platform_counts': platform_counts,
-            'avg_approval_time': round(avg_time, 1)
+            'avg_approval_time': 0
         }
     
+    def get_audit_trail(self, limit=50):
+        if not self.client:
+            return []
+        result = self.client.table('audit_trail').select('*, users(full_name)').order('timestamp', desc=True).limit(limit).execute()
+        entries = []
+        for row in result.data:
+            entries.append({
+                'timestamp': row.get('timestamp', ''),
+                'full_name': row.get('users', {}).get('full_name', ''),
+                'action': row.get('action', ''),
+                'details': row.get('details', ''),
+                'workflow_title': row.get('workflow_id', ''),
+                'workflow_id': row.get('workflow_id', '')
+            })
+        return entries
+    
     def save_platform_config(self, platform_name, config):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE platform_configs 
-            SET api_key = ?, is_connected = 1, settings = ?, last_sync = CURRENT_TIMESTAMP
-            WHERE platform_name = ?
-        ''', (json.dumps(config), json.dumps(config), platform_name))
-        self.conn.commit()
+        if not self.client:
+            return
+        existing = self.client.table('platform_configs').select('*').eq('platform_name', platform_name).execute()
+        data = {
+            'platform_name': platform_name,
+            'api_key': json.dumps(config),
+            'is_connected': True,
+            'settings': json.dumps(config),
+            'last_sync': datetime.now().isoformat()
+        }
+        if existing.data:
+            self.client.table('platform_configs').update(data).eq('platform_name', platform_name).execute()
+        else:
+            data['id'] = f"PLT-{uuid.uuid4().hex[:8].upper()}"
+            self.client.table('platform_configs').insert(data).execute()
     
     def get_platform_config(self, platform_name):
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM platform_configs WHERE platform_name = ? AND is_connected = 1', (platform_name,))
-        result = cursor.fetchone()
-        return json.loads(result['settings']) if result and result['settings'] else None
+        if not self.client:
+            return None
+        result = self.client.table('platform_configs').select('*').eq('platform_name', platform_name).eq('is_connected', True).execute()
+        if result.data and result.data[0].get('settings'):
+            return json.loads(result.data[0]['settings'])
+        return None
+    
+    def conn(self):
+        return self
