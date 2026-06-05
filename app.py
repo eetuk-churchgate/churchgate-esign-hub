@@ -177,10 +177,9 @@ else:
                     success, result = send_docusign_envelope(file_path, recipients, title)
                     if success:
                         st.success(f"✅ Document sent to DocuSign! {result}")
-                        st.info("📧 Approvers will receive an email from DocuSign with a signing link.")
+                        st.info("📧 Approver will receive an email from DocuSign.")
                     else:
                         st.warning(f"⚠️ DocuSign: {result}")
-                        st.info("Workflow created for internal tracking.")
                 for approver_id in approver_ids:
                     db.add_notification(approver_id, f"New workflow requires your approval: {title}", 'approval_required')
                 st.session_state.workflow_created = True
@@ -205,27 +204,24 @@ else:
                             st.markdown("**📎 Attached Document:**")
                             try:
                                 with open(wf['document_path'], 'rb') as doc_file:
-                                    st.download_button(label="📥 Download Document to Review", data=doc_file, file_name=f"document_{wf['id']}.pdf", mime="application/pdf", key=f"doc_{wf['id']}")
+                                    st.download_button(label="📥 Download Document", data=doc_file, file_name=f"document_{wf['id']}.pdf", mime="application/pdf", key=f"doc_{wf['id']}")
                             except:
                                 st.info("📎 Document available in DocuSign email")
                         if wf.get('platform') == 'DocuSign':
-                            st.markdown("### ✍️ Sign via DocuSign")
-                            st.info("📧 Check your email for the DocuSign signing link.")
+                            st.info("📧 Check your email for DocuSign signing link.")
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.button("✅ Approve & Sign", key=f"approve_{wf['id']}"):
                                 db.sign_workflow(wf['id'], user['id'], 'Approved')
-                                db.add_notification(wf['initiator_id'], f"{user['full_name']} signed {wf['title']}", 'workflow_update')
-                                st.success("Document signed successfully!")
+                                st.success("Signed!")
                                 st.rerun()
                         with col2:
                             if st.button("❌ Reject", key=f"reject_{wf['id']}"):
                                 db.update_workflow_status(wf['id'], 'rejected', user['id'])
-                                db.add_notification(wf['initiator_id'], f"{user['full_name']} rejected {wf['title']}", 'workflow_update')
-                                st.error("Workflow rejected")
+                                st.error("Rejected")
                                 st.rerun()
             else:
-                st.info("No pending approvals for you!")
+                st.info("No pending approvals")
         with tab2:
             my_workflows = [w for w in workflows if w['initiator_id'] == user['id']]
             if my_workflows:
@@ -236,21 +232,19 @@ else:
                         st.progress(signed/total if total > 0 else 0, text=f"{signed}/{total} signatures")
                         for approver in wf['approvers']:
                             icon = "✅" if approver['status'] == 'signed' else "⏳"
-                            st.write(f"{icon} {approver['full_name']} - {approver['status']}")
+                            st.write(f"{icon} {approver['full_name']}")
             else:
-                st.info("No workflows initiated by you yet")
+                st.info("No workflows yet")
     
     elif page == "Analytics":
         st.title("📈 Analytics")
         stats = db.get_workflow_stats()
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("Workflow Status Distribution")
             if stats['status_counts']:
                 fig = px.pie(values=list(stats['status_counts'].values()), names=list(stats['status_counts'].keys()))
                 st.plotly_chart(fig, use_container_width=True)
         with col2:
-            st.subheader("Platform Usage")
             if stats['platform_counts']:
                 fig = px.bar(x=list(stats['platform_counts'].keys()), y=list(stats['platform_counts'].values()))
                 st.plotly_chart(fig, use_container_width=True)
@@ -260,68 +254,61 @@ else:
         render_integrations()
     
     elif page == "AddTeam":
-    st.title("➕ Add Team Members")
-    
-    # Add single user
-    st.subheader("Add Individual User")
-    col1, col2 = st.columns(2)
-    with col1:
-        new_username = st.text_input("Username", key="new_user")
-        new_email = st.text_input("Email", key="new_email")
-        new_fullname = st.text_input("Full Name", key="new_name")
-    with col2:
-        new_dept = st.text_input("Department", value="Executive", key="new_dept")
-        new_role = st.selectbox("Role", ["approver", "admin", "manager"], key="new_role")
-    
-    if st.button("➕ Add This User", type="primary"):
-        if new_username and new_email and new_fullname:
+        st.title("➕ Add Team Members")
+        st.subheader("Add Individual User")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_username = st.text_input("Username", key="new_user")
+            new_email = st.text_input("Email", key="new_email")
+            new_fullname = st.text_input("Full Name", key="new_name")
+        with col2:
+            new_dept = st.text_input("Department", value="Executive", key="new_dept")
+            new_role = st.selectbox("Role", ["approver", "admin", "manager"], key="new_role")
+        if st.button("➕ Add This User", type="primary"):
+            if new_username and new_email and new_fullname:
+                cursor = db.conn.cursor()
+                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (f"USR-{uuid.uuid4().hex[:6].upper()}", new_username, new_email, hashlib.sha256('password123'.encode()).hexdigest(), new_fullname, new_dept, new_role))
+                db.conn.commit()
+                st.success(f"✅ {new_fullname} added! Login: {new_username} / password123")
+                st.rerun()
+            else:
+                st.error("Please fill all fields")
+        st.markdown("---")
+        st.subheader("Add Executive Team")
+        if st.button("Add Jerome, Partab, Vinay", type="secondary"):
             cursor = db.conn.cursor()
-            cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (f"USR-{uuid.uuid4().hex[:6].upper()}", new_username, new_email, hashlib.sha256('password123'.encode()).hexdigest(), new_fullname, new_dept, new_role))
+            users = [
+                ('USR-003', 'jerome.das', 'Jeromedas@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+                ('USR-004', 'partab.lalchandani', 'partab@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+                ('USR-005', 'vinay.mahtani', 'vbmahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+            ]
+            for user_data in users:
+                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
             db.conn.commit()
-            st.success(f"✅ {new_fullname} added! Login: {new_username} / password123")
+            st.success("✅ Team added!")
             st.rerun()
-        else:
-            st.error("Please fill all fields")
-    
-    st.markdown("---")
-    
-    # Add bulk team
-    st.subheader("Add Executive Team")
-    if st.button("Add Jerome, Partab, Vinay with Real Emails", type="secondary"):
-        cursor = db.conn.cursor()
-        users = [
-            ('USR-003', 'jerome.das', 'Jeromedas@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
-            ('USR-004', 'partab.lalchandani', 'partab@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
-            ('USR-005', 'vinay.mahtani', 'vbmahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
-        ]
-        for user_data in users:
-            cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
-        db.conn.commit()
-        st.success("✅ Executive team added!")
-        st.rerun()
     
     elif page == "ClearDup":
         st.title("🗑️ Clear All Workflows")
-        st.warning("This will delete ALL workflows, approvals, and audit trails.")
-        if st.button("Delete All Workflows", type="secondary"):
+        if st.button("Delete All", type="secondary"):
             cursor = db.conn.cursor()
             cursor.execute("DELETE FROM approvers")
             cursor.execute("DELETE FROM workflows")
             cursor.execute("DELETE FROM audit_trail")
             db.conn.commit()
-            st.success("✅ All workflows cleared!")
+            st.success("✅ Cleared!")
             st.rerun()
     
     elif page == "Audit":
         st.title("📑 Audit Trail")
         audit_entries = db.get_audit_trail()
         if audit_entries:
-            audit_data = [{'Timestamp': entry['timestamp'], 'User': entry['full_name'], 'Action': entry['action'].title(), 'Details': entry['details'], 'Workflow': entry.get('workflow_title', entry['workflow_id'])} for entry in audit_entries]
+            audit_data = [{'Timestamp': e['timestamp'], 'User': e['full_name'], 'Action': e['action'].title(), 'Details': e['details']} for e in audit_entries]
             df = pd.DataFrame(audit_data)
             st.dataframe(df, use_container_width=True)
             csv = df.to_csv(index=False)
-            st.download_button("📥 Export Audit Log", csv, f"audit_{datetime.now().strftime('%Y%m%d')}.csv")
+            st.download_button("📥 Export CSV", csv, f"audit_{datetime.now().strftime('%Y%m%d')}.csv")
         else:
             st.info("No audit entries yet")
 
