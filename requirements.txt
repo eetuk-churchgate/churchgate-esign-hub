@@ -3,5 +3,5 @@ pandas
 plotly
 python-dotenv
 requests
-PyJWT
-cryptography
+supabase
+psycopg2-binary
