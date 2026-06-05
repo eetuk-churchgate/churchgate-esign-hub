@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import os
 import hashlib
 import time
+import uuid
 
 sys.path.append(str(Path(__file__).parent))
 from database_setup import init_database
@@ -259,23 +260,46 @@ else:
         render_integrations()
     
     elif page == "AddTeam":
-        st.title("➕ Add Real Team Members")
-        if st.button("Add All Team Members with Real Emails", type="primary"):
+    st.title("➕ Add Team Members")
+    
+    # Add single user
+    st.subheader("Add Individual User")
+    col1, col2 = st.columns(2)
+    with col1:
+        new_username = st.text_input("Username", key="new_user")
+        new_email = st.text_input("Email", key="new_email")
+        new_fullname = st.text_input("Full Name", key="new_name")
+    with col2:
+        new_dept = st.text_input("Department", value="Executive", key="new_dept")
+        new_role = st.selectbox("Role", ["approver", "admin", "manager"], key="new_role")
+    
+    if st.button("➕ Add This User", type="primary"):
+        if new_username and new_email and new_fullname:
             cursor = db.conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username IN ('john.doe', 'jane.smith')")
-            users = [
-                ('USR-003', 'jerome.das', 'Jeromedas@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
-                ('USR-004', 'partab.lalchandani', 'partab@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
-                ('USR-005', 'vinay.mahtani', 'vbmahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
-            ]
-            for user_data in users:
-                cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
-            cursor.execute("UPDATE users SET email = 'eetuk@churchgate.com' WHERE username = 'etuk'")
-            cursor.execute("UPDATE users SET email = 'lawal@churchgate.com' WHERE username = 'lawal'")
+            cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (f"USR-{uuid.uuid4().hex[:6].upper()}", new_username, new_email, hashlib.sha256('password123'.encode()).hexdigest(), new_fullname, new_dept, new_role))
             db.conn.commit()
-            st.success("✅ All team members added with real emails!")
-            st.info("Etuk: eetuk@churchgate.com | Lawal: lawal@churchgate.com | Jerome: Jeromedas@churchgate.com | Partab: partab@churchgate.com | Vinay: vbmahtani@churchgate.com")
+            st.success(f"✅ {new_fullname} added! Login: {new_username} / password123")
             st.rerun()
+        else:
+            st.error("Please fill all fields")
+    
+    st.markdown("---")
+    
+    # Add bulk team
+    st.subheader("Add Executive Team")
+    if st.button("Add Jerome, Partab, Vinay with Real Emails", type="secondary"):
+        cursor = db.conn.cursor()
+        users = [
+            ('USR-003', 'jerome.das', 'Jeromedas@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Jerome Das', 'Executive', 'approver'),
+            ('USR-004', 'partab.lalchandani', 'partab@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Partab Lalchandani', 'Executive', 'approver'),
+            ('USR-005', 'vinay.mahtani', 'vbmahtani@churchgate.com', hashlib.sha256('password123'.encode()).hexdigest(), 'Vinay Mahtani', 'Executive', 'approver'),
+        ]
+        for user_data in users:
+            cursor.execute('INSERT OR IGNORE INTO users (id, username, email, password_hash, full_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)', user_data)
+        db.conn.commit()
+        st.success("✅ Executive team added!")
+        st.rerun()
     
     elif page == "ClearDup":
         st.title("🗑️ Clear All Workflows")
